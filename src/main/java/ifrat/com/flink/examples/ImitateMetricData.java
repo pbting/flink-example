@@ -32,4 +32,13 @@ public class ImitateMetricData implements Serializable {
     public void setTimestamp(long timestamp) {
         this.timestamp = timestamp;
     }
+
+    @Override
+    public String toString() {
+        return "Data{" +
+                "name='" + name + '\'' +
+                ", value=" + value +
+                ", timestamp=" + timestamp +
+                '}';
+    }
 }
