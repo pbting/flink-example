@@ -1,37 +1,17 @@
 package ifrat.com.flink.examples;
 
+import lombok.Data;
+
 import java.io.Serializable;
 
+@Data
 public class ImitateMetricData implements Serializable {
 
+    private String oneLevelGroupKey;
     private String name;
-    private Double value;
+    private Double value = 0.0D;
 
     private long timestamp;
-
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public Double getValue() {
-        return value;
-    }
-
-    public void setValue(Double value) {
-        this.value = value;
-    }
-
-    public long getTimestamp() {
-        return timestamp;
-    }
-
-    public void setTimestamp(long timestamp) {
-        this.timestamp = timestamp;
-    }
 
     @Override
     public String toString() {

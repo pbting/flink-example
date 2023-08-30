@@ -22,15 +22,13 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
  * https://nightlies.apache.org/flink/flink-docs-master/docs/dev/datastream/sources/
  */
-public class FlinkKafkaSourceExample007 {
+public class FlinkKafkaSourceExample014 {
 
     public static void main(String[] args) throws Exception {
 
@@ -38,6 +36,7 @@ public class FlinkKafkaSourceExample007 {
                 .setBootstrapServers("10.253.17.30:39094")
                 .setTopics("skywalking-otel-meters")
                 .setGroupId("cls-cgroup")
+                .setProperty("partition.discovery.interval.ms", "10000")
                 .setStartingOffsets(OffsetsInitializer.latest())
                 .setDeserializer(new KafkaRecordDeserializationSchema<ExportMetricsServiceRequest>() {
                     @Override
@@ -56,10 +55,6 @@ public class FlinkKafkaSourceExample007 {
                     }
                 })
                 .build();
-
-//        Properties properties = new Properties();
-//        FlinkKafkaConsumer kafkaConsumer =
-//                new FlinkKafkaConsumer("ifrat-demo", new SimpleStringSchema(), properties);
 
         StreamExecutionEnvironment environment = StreamExecutionEnvironment.getExecutionEnvironment();
 
@@ -82,17 +77,19 @@ public class FlinkKafkaSourceExample007 {
         environment.getConfig().registerTypeWithKryoSerializer(ExportMetricsServiceRequest.class,
                 com.twitter.chill.protobuf.ProtobufSerializer.class);
         environment.getConfig().setAutoWatermarkInterval(TimeUnit.SECONDS.toMillis(3));
-
         environment.fromSource(kafkaSource,
                         WatermarkStrategy.<ExportMetricsServiceRequest>forBoundedOutOfOrderness(Duration.ofSeconds(5))
                                 .withTimestampAssigner(new SerializableTimestampAssigner<ExportMetricsServiceRequest>() {
                                     @Override
                                     public long extractTimestamp(ExportMetricsServiceRequest element, long recordTimestamp) {
-
                                         return ExportMetricsServiceRequestUtil.extractTimestamp(element);
                                     }
                                 }),
                         "kafka-source")
+                // 注意: 这里的并行度要和 topic 的 分区数保持一致，不然就会导致窗口一直不触发，参考:
+                // https://blog.csdn.net/weixin_43956734/article/details/120252842?spm=1001.2101.3001.6661.1&utm_medium=distribute.pc_relevant_t0.none-task-blog-2%7Edefault%7ECTRLIST%7ERate-1-120252842-blog-123002816.235%5Ev38%5Epc_relevant_sort&depth_1-utm_source=distribute.pc_relevant_t0.none-task-blog-2%7Edefault%7ECTRLIST%7ERate-1-120252842-blog-123002816.235%5Ev38%5Epc_relevant_sort&utm_relevant_index=1
+                .setParallelism(1)
+                .name("otel-kafka")
                 .flatMap(new RichFlatMapFunction<ExportMetricsServiceRequest, GroupMetricsModel>() {
 
                     /**
@@ -107,6 +104,7 @@ public class FlinkKafkaSourceExample007 {
                         List<ResourceMetrics> resourceMetrics = value.getResourceMetricsList();
                         final HashMap<String, Metric> metricMap = new HashMap<>();
                         final long timestamp = ExportMetricsServiceRequestUtil.extractTimestamp(value);
+                        System.out.println("=> " + new Date(timestamp));
                         // sw_jvm.cpu.usage and sw_jvm.thread.live.count 这两个指标
                         for (ResourceMetrics metrics : resourceMetrics) {
                             List<ScopeMetrics> scopeMetrics = metrics.getScopeMetricsList();
@@ -120,28 +118,6 @@ public class FlinkKafkaSourceExample007 {
                         }
 
 
-                        // 先处理多个指标联合告警的情况
-                        try {
-                            GroupMetricsModel multiMetricUnion = new GroupMetricsModel();
-                            multiMetricUnion.setTimestamp(timestamp);
-                            multiMetricUnion.setGroupKey("sw_jvm.cpu.usage#sw_jvm.thread.live.count");
-                            multiMetricUnion.getMetrics().put("sw_jvm.cpu.usage",
-                                    new GroupMetricsModel.MetricModel("sw_jvm.cpu.usage",
-                                            metricMap.get("sw_jvm.cpu.usage")
-                                                    .getGauge().getDataPointsCount() > 0 ?
-                                                    metricMap.get("sw_jvm.cpu.usage")
-                                                            .getGauge().getDataPoints(0).getAsInt() : 0));
-                            multiMetricUnion.getMetrics().put("sw_jvm.thread.live.count",
-                                    new GroupMetricsModel.MetricModel("sw_jvm.thread.live.count",
-                                            metricMap.get("sw_jvm.thread.live.count")
-                                                    .getGauge().getDataPointsCount() > 0 ?
-                                                    metricMap.get("sw_jvm.thread.live.count")
-                                                            .getGauge().getDataPoints(0).getAsInt() : 0));
-
-                            out.collect(multiMetricUnion);
-                        } catch (Exception e) {
-                            // nothing to do
-                        }
                         // 然后再单个 metric 处理
                         for (Map.Entry<String, Metric> entry : metricMap.entrySet()) {
                             GroupMetricsModel model = new GroupMetricsModel();
@@ -158,12 +134,20 @@ public class FlinkKafkaSourceExample007 {
                 })
                 .keyBy(new KeySelector<GroupMetricsModel, String>() {
 
+                    // 定义了三组联合计算的指标 A+B、C+D、A+C
+                    // 这个时候需要将 A 、B、C 、D 三个类型的指标路由到同一个的时间窗口聚合函数处理
+                    // sw_jvm.cpu.usage and sw_jvm.thread.live.count
+                    private final List<String> unionMetricList =
+                            Arrays.asList("sw_jvm.cpu.usage", "sw_jvm.thread.live.count");
+
                     @Override
                     public String getKey(GroupMetricsModel value) throws Exception {
-                        return value.getGroupKey();
+                        // 在这里控制联合的多个指标 key by 到同一个算子
+                        return unionMetricList.contains(value.getGroupKey()) ? "union_key" : value.getGroupKey();
                     }
                 })
-                .window(TumblingEventTimeWindows.of(Time.seconds(5)))
+
+                .window(TumblingEventTimeWindows.of(Time.seconds(10)))
                 .aggregate(new AggregateFunction<GroupMetricsModel, ImitateMetricData, ImitateMetricData>() {
                     @Override
                     public ImitateMetricData createAccumulator() {
@@ -172,40 +156,42 @@ public class FlinkKafkaSourceExample007 {
 
                     @Override
                     public ImitateMetricData add(GroupMetricsModel value, ImitateMetricData accumulator) {
+
                         if (accumulator.getName() == null) {
                             accumulator.setName(value.getGroupKey());
-                            accumulator.setValue(0.0D);
                         }
 
-                        for (GroupMetricsModel.MetricModel model : value.getMetrics().values()) {
-                            accumulator.setValue(accumulator.getValue() + model.getValue());
+                        for (GroupMetricsModel.MetricModel metric : value.getMetrics().values()) {
+                            if (metric == null) {
+                                continue;
+                            }
+                            accumulator.setValue(accumulator.getValue() + metric.getValue());
                         }
+
 
                         accumulator.setTimestamp(value.getTimestamp());
-
                         return accumulator;
                     }
 
                     @Override
                     public ImitateMetricData getResult(ImitateMetricData accumulator) {
-                        System.err.println("get result: " + accumulator.toString());
                         return accumulator;
                     }
 
                     @Override
                     public ImitateMetricData merge(ImitateMetricData a, ImitateMetricData b) {
-                        System.err.println("-> merge ->");
+                        a.setValue(a.getValue() + b.getValue());
                         return a;
                     }
                 })
                 .addSink(new SinkFunction<ImitateMetricData>() {
                     @Override
                     public void invoke(ImitateMetricData value, Context context) throws Exception {
-                        if (value.getName().contains("#")) {
-                            System.err.println(Thread.currentThread().getName()+" =>" + value);
-                        }
+                        // 统一按照时间窗口对齐
+                        value.setTimestamp(context.currentWatermark());
+                        System.err.println(value);
                     }
-                }).name("otel-sink").setParallelism(3);
+                });
 
         environment.execute("kafka-otel-meters-example");
     }

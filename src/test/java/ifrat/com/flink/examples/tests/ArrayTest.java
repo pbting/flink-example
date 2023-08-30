@@ -17,4 +17,12 @@ public class ArrayTest {
             System.out.println(rtArray[ThreadLocalRandom.current().nextInt(rtArray.length)]);
         }
     }
+
+    @Test
+    public void randomNext() {
+        for (int i = 0; i < 30; i++) {
+            int value = ThreadLocalRandom.current().nextInt(4) + 1;
+            System.err.println(value);
+        }
+    }
 }
