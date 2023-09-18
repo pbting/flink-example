@@ -1,5 +1,6 @@
 package ifrat.com.flink.examples;
 
+import ifrat.com.flink.examples.otel.ExportMetricsServiceRequestUtil;
 import io.opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest;
 import io.opentelemetry.proto.metrics.v1.Metric;
 import io.opentelemetry.proto.metrics.v1.ResourceMetrics;

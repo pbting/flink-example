@@ -1,4 +1,4 @@
-package ifrat.com.flink.examples;
+package ifrat.com.flink.examples.otel;
 
 import io.opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest;
 import io.opentelemetry.proto.common.v1.AnyValue;
@@ -7,7 +7,14 @@ import io.opentelemetry.proto.metrics.v1.Metric;
 import io.opentelemetry.proto.metrics.v1.ResourceMetrics;
 import io.opentelemetry.proto.metrics.v1.ScopeMetrics;
 import io.opentelemetry.proto.resource.v1.Resource;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.util.Collector;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 
+import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -57,5 +64,31 @@ public final class ExportMetricsServiceRequestUtil {
         }
 
         return results;
+    }
+
+    public static KafkaSource<ExportMetricsServiceRequest> buildKafkaSource() {
+
+        return KafkaSource.<ExportMetricsServiceRequest>builder()
+                .setBootstrapServers("10.253.17.30:39094")
+                .setTopics("skywalking-otel-meters")
+                .setGroupId("cls-cgroup")
+                .setStartingOffsets(OffsetsInitializer.latest())
+                .setDeserializer(new KafkaRecordDeserializationSchema<ExportMetricsServiceRequest>() {
+                    @Override
+                    public void deserialize(ConsumerRecord<byte[], byte[]> consumerRecord,
+                                            Collector<ExportMetricsServiceRequest> collector) throws IOException {
+
+                        byte[] value = consumerRecord.value();
+                        ExportMetricsServiceRequest request = ExportMetricsServiceRequest.parseFrom(value);
+
+                        collector.collect(request);
+                    }
+
+                    @Override
+                    public TypeInformation<ExportMetricsServiceRequest> getProducedType() {
+                        return TypeInformation.of(ExportMetricsServiceRequest.class);
+                    }
+                })
+                .build();
     }
 }

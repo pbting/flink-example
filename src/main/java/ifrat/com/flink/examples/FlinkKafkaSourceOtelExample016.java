@@ -1,5 +1,8 @@
 package ifrat.com.flink.examples;
 
+import ifrat.com.flink.examples.otel.ExportMetricsServiceRequestUtil;
+import ifrat.com.flink.examples.otel.UnionMetricAggResult;
+import ifrat.com.flink.examples.otel.UnionMetricGroupByModel;
 import io.opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.functions.AggregateFunction;
@@ -128,29 +131,20 @@ public class FlinkKafkaSourceOtelExample016 {
                         }
 
                         // 举个例子，这里对每个指标统计 min、max 等值
-                        UnionMetricAggResult.MultiValueAggMetricModel aggMetricModel =
-                                accumulator.getMetricModelMap().get(value.getName());
-
-                        if (aggMetricModel == null) {
-                            aggMetricModel = new UnionMetricAggResult.MultiValueAggMetricModel();
-                            aggMetricModel.setName(value.getName());
-                            accumulator.getMetricModelMap().put(value.getName(), aggMetricModel);
-                        }
-
                         // 1. 计算 min
                         long currentVal = value.getValue();
-                        if (currentVal < aggMetricModel.getMinVal()) {
-                            aggMetricModel.setMinVal(currentVal);
+                        if (currentVal < accumulator.getMinVal()) {
+                            accumulator.setMinVal(currentVal);
                         }
 
                         // 2. 计算 max
-                        if (currentVal > aggMetricModel.getMaxVal()) {
-                            aggMetricModel.setMaxVal(currentVal);
+                        if (currentVal > accumulator.getMaxVal()) {
+                            accumulator.setMaxVal(currentVal);
                         }
 
                         // 3. 计算 sum, 同时统计 count，以便后面计算 avg
-                        aggMetricModel.setCount(aggMetricModel.getCount() + 1);
-                        aggMetricModel.setSum(aggMetricModel.getSum() + currentVal);
+                        accumulator.setCount(accumulator.getCount() + 1);
+                        accumulator.setSum(accumulator.getSum() + currentVal);
 
                         return accumulator;
                     }
@@ -158,9 +152,7 @@ public class FlinkKafkaSourceOtelExample016 {
                     @Override
                     public UnionMetricAggResult getResult(UnionMetricAggResult accumulator) {
 
-                        for (UnionMetricAggResult.MultiValueAggMetricModel mode : accumulator.getMetricModelMap().values()) {
-                            mode.setAvg((double) mode.getSum() / mode.getCount());
-                        }
+                        accumulator.setAvg((double) accumulator.getSum() / accumulator.getCount());
 
                         return accumulator;
                     }

@@ -37,7 +37,7 @@ public class FlinkTwoLevelAggExample015 {
                     }
                 })
                 .window(TumblingEventTimeWindows.of(Time.seconds(10)))
-                .aggregate(new ExampleAggregateFunction()).name("one-level-agg").setParallelism(4)
+                .aggregate(new ExampleSumAggregateFunction()).name("one-level-agg").setParallelism(4)
                 .addSink(new SinkFunction<ImitateMetricData>() {
                     @Override
                     public void invoke(ImitateMetricData value, Context context) throws Exception {

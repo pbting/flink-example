@@ -2,7 +2,24 @@ package ifrat.com.flink.examples;
 
 import org.apache.flink.api.common.functions.AggregateFunction;
 
-public class ExampleAggregateFunction implements AggregateFunction<ImitateMetricData, ImitateMetricData, ImitateMetricData> {
+import java.io.PrintStream;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
+
+public class ExampleSumAggregateFunction implements AggregateFunction<ImitateMetricData, ImitateMetricData, ImitateMetricData> {
+
+    private AtomicLong count = new AtomicLong();
+    private String tag = "None";
+    private Map<String, ImitateMetricData> ruleMap = new HashMap<>();
+
+    public ExampleSumAggregateFunction() {
+    }
+
+    public ExampleSumAggregateFunction(String tag) {
+        this.tag = tag;
+    }
+
     @Override
     public ifrat.com.flink.examples.ImitateMetricData createAccumulator() {
         return new ifrat.com.flink.examples.ImitateMetricData();
@@ -10,6 +27,14 @@ public class ExampleAggregateFunction implements AggregateFunction<ImitateMetric
 
     @Override
     public ifrat.com.flink.examples.ImitateMetricData add(ImitateMetricData value, ImitateMetricData accumulator) {
+        if ("rule".equals(value.getLable())) {
+            // 在这里需要观察是否规则都到了所有的的聚合算子
+            PrintStream printStream = count.incrementAndGet() % 2 == 0 ? System.err : System.out;
+            printStream.println(Thread.currentThread().getName() + "=> " + tag + " => " + value + "; size=" + ruleMap.size());
+            ruleMap.put(value.getName() + "_" + value.getOp(), value);
+            return accumulator;
+        }
+
         if (accumulator.getName() == null) {
             accumulator.setName(value.getName());
             accumulator.setOneLevelGroupKey(value.getOneLevelGroupKey());
@@ -18,8 +43,7 @@ public class ExampleAggregateFunction implements AggregateFunction<ImitateMetric
         accumulator.setValue(accumulator.getValue() + value.getValue());
         accumulator.setTimestamp(value.getTimestamp());
 
-        System.out.print(value.getOneLevelGroupKey() + " => ");
-        System.err.println(Thread.currentThread().getName() + "-> " + value.getName());
+
         return accumulator;
     }
 
