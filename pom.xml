@@ -45,10 +45,6 @@
                 </exclusion>
                 <exclusion>
                     <groupId>org.apache.skywalking</groupId>
-                    <artifactId>apm-network</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.skywalking</groupId>
                     <artifactId>library-module</artifactId>
                 </exclusion>
                 <exclusion>
